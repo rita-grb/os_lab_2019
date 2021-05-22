@@ -22,6 +22,7 @@ int main(int argc, char **argv) {
   bool with_files = false;
 
   while (true) {
+    /*optind – индекс на следующий указатель argv, который будет обработан при следующем вызове getopt().*/
     int current_optind = optind ? optind : 1;
 
     static struct option options[] = {{"seed", required_argument, 0, 0},
@@ -30,28 +31,44 @@ int main(int argc, char **argv) {
                                       {"by_files", no_argument, 0, 'f'},
                                       {0, 0, 0, 0}};
 
-    int option_index = 0;
+    int option_index = 0; //индекс опции
+
+    /* getopt_long возвращает первый параметр и задает некоторые глобальные переменные.
+     * При повторном вызове с теми же аргументами функция вернет следующий параметр и задаст 
+     * глобальную переменную. Если больше не будет найдено опций, которые надо распознать, то функция
+     * вернет -1, что означает завершение обработки команды.
+     */
+
     int c = getopt_long(argc, argv, "f", options, &option_index);
 
-    if (c == -1) break;
+    if (c == -1) break; // опций для обработки больше нет, завершение обработки команды
 
     switch (c) {
       case 0:
         switch (option_index) {
           case 0:
             seed = atoi(optarg);
-            // your code here
-            // error handling
+            if(seed<=0)
+            {
+              printf("\nSeed is a positive number!\n\n");
+              return 1;
+            }
             break;
           case 1:
             array_size = atoi(optarg);
-            // your code here
-            // error handling
+            if (array_size <= 0)
+            {
+              printf("\nArray_size is a positive number!\n\n");
+              return 1;
+            }
             break;
           case 2:
             pnum = atoi(optarg);
-            // your code here
-            // error handling
+            if(pnum <= 0)
+            {
+              printf("\nPnum is a positive number!\n\n");
+              return 1;
+            } 
             break;
           case 3:
             with_files = true;
@@ -91,21 +108,60 @@ int main(int argc, char **argv) {
   struct timeval start_time;
   gettimeofday(&start_time, NULL);
 
-  for (int i = 0; i < pnum; i++) {
-    pid_t child_pid = fork();
-    if (child_pid >= 0) {
-      // successful fork
-      active_child_processes += 1;
-      if (child_pid == 0) {
-        // child process
+  int step = array_size / pnum;
 
-        // parallel somehow
+  FILE* fl;  // создаем указатель на файл
+  int fd[2]; // создаем файловые дескрипторы для pipe
+
+  if(with_files)
+  {
+    // Попытаемся открыть файл
+    if ((fl = fopen("usage_file.txt", "w")) == NULL)
+    {
+      printf("Can\'t open file\n");
+      return 1;
+    }
+  }
+  else
+  {
+    // Попытаемся создать pipe
+    if (pipe(fd) < 0)
+    {
+      printf("Can\'t create pipe\n");
+      return 1;
+    }
+  }
+
+  for (int i = 0; i < pnum; i++) 
+  {
+    pid_t child_pid = fork();
+    if (child_pid >= 0) 
+    {
+      active_child_processes += 1;
+      if (child_pid == 0) 
+      {
+        struct MinMax min_max_i;
+                
+        if (i != pnum - 1)
+        {
+          min_max_i = GetMinMax(array, i * step, (i + 1) * step - 1);
+        }
+        else
+        {
+          min_max_i = GetMinMax(array, i * step, array_size);
+        }
 
         if (with_files) {
-          // use files here
+          fwrite(&min_max_i.min, sizeof(int), 1, fl);
+          fwrite(&min_max_i.max, sizeof(int), 1, fl);
+          fclose(fl);
         } else {
-          // use pipe here
+          close(fd[0]);
+          write(fd[1], &min_max_i.min, sizeof(int));
+          write(fd[1], &min_max_i.max, sizeof(int));
+          close(fd[1]);
         }
+        
         return 0;
       }
 
@@ -116,8 +172,7 @@ int main(int argc, char **argv) {
   }
 
   while (active_child_processes > 0) {
-    // your code here
-
+    wait(NULL);
     active_child_processes -= 1;
   }
 
@@ -130,14 +185,24 @@ int main(int argc, char **argv) {
     int max = INT_MIN;
 
     if (with_files) {
-      // read from files
+      fl = fopen("usage_file.txt", "r");
+        fread(&min, sizeof(int),1, fl);
+        fread(&max, sizeof(int),1, fl);
     } else {
-      // read from pipes
+      close(fd[1]);
+        read(fd[0], &min, sizeof(int));
+        read(fd[0], &max, sizeof(int));
+        close(fd[0]);
     }
 
     if (min < min_max.min) min_max.min = min;
     if (max > min_max.max) min_max.max = max;
   }
+
+  if (with_files) 
+    {
+      fclose(fl);
+    }
 
   struct timeval finish_time;
   gettimeofday(&finish_time, NULL);
